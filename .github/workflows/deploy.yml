@@ -1,11 +1,11 @@
-name: Deploy GitHub Pages
+name: Build e Deploy GitHub Pages
 on:
   push:
     branches: ["main"]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -23,16 +24,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restaurar index de desenvolvimento
+        run: cp source-index.html index.html
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Install dependencies
+      - name: Instalar dependências
         run: npm install
 
-      - name: Build
+      - name: Compilar aplicação
         run: npm run build
+
+      - name: Publicar build também na raiz da main
+        run: |
+          rm -rf assets
+          cp dist/index.html index.html
+          cp -r dist/assets assets
+          cp dist/manifest.webmanifest manifest.webmanifest
+          cp dist/sw.js sw.js
+          cp dist/CNAME CNAME
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html assets manifest.webmanifest sw.js CNAME
+          if ! git diff --cached --quiet; then
+            git commit -m "Publicar build estático [skip ci]"
+            git push
+          fi
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
