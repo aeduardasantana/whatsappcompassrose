@@ -35,7 +35,12 @@ function firstActionablePosition(){
 function todayKey(){return new Date().toLocaleDateString('sv-SE')}
 function syncDaily(){const d=todayKey();if(!state.daily||state.daily.date!==d)state.daily={date:d,count:0}}
 function remainingToday(){syncDaily();return Math.max(0,40-state.daily.count)}
-function openWhatsAppHome(){window.open('https://web.whatsapp.com/','compassWhatsApp')}
+function openWhatsAppWindow(url='https://web.whatsapp.com/'){
+  const w=window.open(url,'compassWhatsApp','popup=yes,width=560,height=820,resizable=yes,scrollbars=yes');
+  if(!w) alert('O navegador bloqueou a janela do WhatsApp. Permita pop-ups para este site.');
+  return w;
+}
+function openWhatsAppHome(){openWhatsAppWindow()}
 function normPhone(v=''){return String(v).replace(/\D/g,'')}
 function esc(v=''){return String(v).replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[s]))}
 function pick(obj,names){for(const n of names){const k=Object.keys(obj).find(x=>x.trim().toLowerCase()===n);if(k!==undefined)return obj[k]}return ''}
@@ -56,7 +61,7 @@ function dashboard(){syncDaily();const valid=state.contacts.filter(c=>c.phone).l
 <div class="card metric"><span>Selecionados</span><strong>${state.contacts.filter(c=>c.selected).length}</strong><small class="muted">para a próxima campanha</small></div>
 <div class="card metric"><span>Enviados hoje</span><strong>${state.daily.count}/40</strong><small class="muted">${remainingToday()} disponíveis hoje</small></div>
 <div class="card metric"><span>Variações</span><strong>${state.campaign.variations.filter(Boolean).length}</strong><small class="muted">mensagens configuradas</small></div></div>
-<div class="card section"><h3>Fluxo</h3><p>Importe o Excel → configure a campanha → abra o WhatsApp Web → monte a fila → abra a conversa → envie no WhatsApp → confirme no Compass → aguarde 60 segundos → próximo contato.</p></div>`}
+<div class="card section"><h3>Fluxo</h3><p>Importe o Excel → configure a campanha → monte a fila → o Compass abre o contato com a mensagem preenchida → você envia no WhatsApp → confirma no Compass → cronômetro de 60 segundos → próximo contato.</p></div>`}
 
 function whatsapp(){syncDaily();view.innerHTML=header('WhatsApp','A conexão é feita diretamente no WhatsApp Web')+`<div class="card"><h3>Conta ativa</h3><p>Informe na campanha qual conta está usando. Para conectar ou trocar de usuário, faça isso diretamente no WhatsApp Web.</p><div class="row"><button class="btn primary" id="openWa">Abrir WhatsApp Web</button></div><p class="muted" style="margin-top:14px">Se ainda não houver sessão, o próprio WhatsApp exibirá o QR Code. Para trocar de conta, use os recursos de sessão/aparelhos conectados do WhatsApp Web.</p></div><div class="card section"><h3>Regras desta versão</h3><p><strong>1 conta por vez · máximo 40 envios/dia · intervalo mínimo 60 segundos.</strong></p><p class="muted">O Compass não lê sua senha, QR Code ou sessão. Ele apenas abre as conversas com a mensagem preparada.</p></div>`;openWa.onclick=openWhatsAppHome}
 function contacts(){view.innerHTML=header('Contatos','Importe .xlsx, .xls ou .csv; os dados permanecem neste navegador')+`<div class="card"><div class="row">
@@ -79,37 +84,71 @@ function dispatch(){
   const skipped=state.queue.filter(q=>q.status==='pulado').length;
   const errors=state.queue.filter(q=>q.status==='erro').length;
   const uncertain=state.queue.filter(q=>q.status==='incerto').length;
+  const opened=state.queue.find(q=>q.status==='aberto');
   const pct=total?Math.round(sent/total*100):0;
   const waiting=Math.max(0,Math.ceil(((state.waitUntil||0)-Date.now())/1000));
   const next=state.queue.find(q=>q.position>=state.resumeFrom&&q.status==='pendente');
-  const canOpen=next&&waiting===0&&remainingToday()>0;
+  const canOpen=!opened&&next&&waiting===0&&remainingToday()>0;
   const nextPos=next?.position||'-';
+  const openedContact=opened?state.contacts.find(x=>x.id===opened.contactId):null;
 
-  view.innerHTML=header('Disparo assistido','Checkpoint automático · retomada por posição')+`<div class="card">
+  const actionPanel=opened&&openedContact
+    ? `<div class="action-panel active-step">
+        <div class="eyebrow">CONTATO ABERTO NO WHATSAPP</div>
+        <div class="action-person"><strong>Posição ${opened.position} · ${esc(openedContact.name||'Sem nome')}</strong><span>${esc(openedContact.phone)}</span></div>
+        <p>Envie a mensagem na janela do WhatsApp. Depois volte aqui e confirme.</p>
+        <div class="big-actions">
+          <button class="btn primary xl" id="confirmCurrent">CONFIRMAR QUE ENVIEI</button>
+          <button class="btn secondary" id="reopenCurrent">Reabrir contato</button>
+          <button class="btn secondary" id="skipCurrent">Pular este contato</button>
+        </div>
+      </div>`
+    : waiting>0
+    ? `<div class="action-panel waiting-step">
+        <div class="eyebrow">INTERVALO DE SEGURANÇA</div>
+        <div class="countdown">${waiting}<small>s</small></div>
+        <p>O próximo contato será liberado quando o cronômetro chegar a zero.</p>
+        <div class="next-preview">Próxima posição: <strong>${nextPos}</strong></div>
+      </div>`
+    : next
+    ? `<div class="action-panel ready-step">
+        <div class="eyebrow">PRONTO PARA O PRÓXIMO CONTATO</div>
+        <div class="action-person"><strong>Posição ${next.position}</strong><span>O WhatsApp será reutilizado na mesma janela.</span></div>
+        <button class="btn primary xl" id="openNextHero">ABRIR PRÓXIMO CONTATO</button>
+      </div>`
+    : `<div class="action-panel done-step">
+        <div class="eyebrow">FILA SEM PENDÊNCIAS</div>
+        <strong>${total?'Campanha concluída ou sem contatos pendentes.':'Monte uma fila para começar.'}</strong>
+      </div>`;
+
+  view.innerHTML=header('Disparo','Fluxo assistido · você envia no WhatsApp, o Compass controla a fila')+`
+  ${actionPanel}
+  <div class="card section">
     <div class="statusbar"><strong>${sent}/${total}</strong><div class="progress"><span style="width:${pct}%"></span></div><span>${pct}%</span></div>
-    <div class="row" style="margin-top:14px">
+    <div class="stats-row">
       <span><strong>Enviados:</strong> ${sent}</span>
       <span><strong>Pendentes:</strong> ${pending}</span>
       <span><strong>Erros:</strong> ${errors}</span>
       <span><strong>Incertos:</strong> ${uncertain}</span>
       <span><strong>Pulados:</strong> ${skipped}</span>
+      <span><strong>Hoje:</strong> ${state.daily.count}/40</span>
     </div>
-    <p style="margin-top:14px"><strong>Hoje:</strong> ${state.daily.count}/40 · <strong>Próxima posição:</strong> ${nextPos}</p>
-    ${waiting>0?`<p class="warn"><strong>Aguarde ${waiting}s</strong> para liberar o próximo contato.</p>`:''}
-    <div class="row" style="margin-top:16px">
+  </div>
+  <div class="card section">
+    <h3>Controle da fila</h3>
+    <div class="row">
       <button class="btn secondary" id="openWa">Abrir WhatsApp Web</button>
       <button class="btn secondary" id="build">Montar/reiniciar fila</button>
       <button class="btn secondary" id="resumeFirst">Continuar do primeiro pendente</button>
-      <div class="field" style="max-width:190px;min-width:150px">
-        <label>Ir para posição</label>
+      <div class="field compact-field">
+        <label>Continuar da posição</label>
         <input id="goPosition" type="number" min="1" max="${Math.max(total,1)}" value="${state.resumeFrom||1}">
       </div>
       <button class="btn secondary" id="applyPosition">Aplicar posição</button>
-      <button class="btn primary" id="openNext" ${canOpen?'':'disabled'}>Abrir próximo contato</button>
       <button class="btn danger" id="cancel">Cancelar fila</button>
     </div>
+    <p class="muted" style="margin-bottom:0">Conta em uso: <strong>${esc(state.campaign.sender)}</strong> · intervalo mínimo: 60 s · limite: 40 envios/dia.</p>
   </div>
-  <div class="card section"><h3>Campanha</h3><p><strong>${esc(state.campaign.name||'Sem nome')}</strong> · conta em uso: <strong>${esc(state.campaign.sender)}</strong></p><p class="muted">Cada alteração de status é salva imediatamente neste navegador. Itens enviados não são reenviados automaticamente.</p></div>
   <div class="card section table-wrap" id="qtable"></div>`;
 
   openWa.onclick=openWhatsAppHome;
@@ -121,11 +160,21 @@ function dispatch(){
     save();
     dispatch();
   };
-  openNext.onclick=openNextContact;
   cancel.onclick=()=>{if(confirm('Cancelar e apagar a fila atual?')){state.queue=[];state.results=[];state.waitUntil=0;state.resumeFrom=1;save();dispatch()}};
+
+  const hero=document.querySelector('#openNextHero');
+  if(hero)hero.onclick=openNextContact;
+  const confirmCurrent=document.querySelector('#confirmCurrent');
+  if(confirmCurrent)confirmCurrent.onclick=()=>confirmSent(state.queue.indexOf(opened));
+  const reopenCurrent=document.querySelector('#reopenCurrent');
+  if(reopenCurrent)reopenCurrent.onclick=()=>reopenItem(opened);
+  const skipCurrent=document.querySelector('#skipCurrent');
+  if(skipCurrent)skipCurrent.onclick=()=>skipContact(state.queue.indexOf(opened));
+
   renderQueue();
   if(waiting>0)setTimeout(()=>{if(document.querySelector('#qtable'))dispatch()},1000);
 }
+
 function renderQueue(){
   if(!qtable)return;
   const rows=state.queue.slice(0,200).map((q,i)=>{
@@ -161,9 +210,18 @@ function openNextContact(){
   q.attempts=(q.attempts||0)+1;
   state.resumeFrom=q.position;
   save();
-  window.open(url,'compassWhatsApp');
+  openWhatsAppWindow(url);
   dispatch();
 }
+function reopenItem(q){
+  if(!q)return;
+  const ct=state.contacts.find(x=>x.id===q.contactId);
+  const vars=state.campaign.variations.filter(Boolean);
+  const msg=renderTemplate(vars[q.variation%vars.length],ct);
+  const url='https://web.whatsapp.com/send?phone='+encodeURIComponent(ct.phone)+'&text='+encodeURIComponent(msg);
+  openWhatsAppWindow(url);
+}
+
 function confirmSent(i){
   syncDaily();
   const q=state.queue[i];
@@ -211,7 +269,7 @@ function retryItem(i){
 }
 function skipContact(i){const q=state.queue[i];if(!q)return;q.status='pulado';if(state.resumeFrom<=q.position)state.resumeFrom=q.position+1;save();dispatch()}
 function report(){view.innerHTML=header('Relatório','Exporte o resultado e use o Excel como histórico')+`<div class="card"><div class="row"><button class="btn primary" id="exportResults">Exportar relatório .xlsx</button><button class="btn secondary" id="exportContacts">Exportar contatos atuais .xlsx</button><button class="btn danger" id="clearResults">Limpar resultado local</button></div></div><div class="card section table-wrap" id="rtable"></div>`;
-exportResults.onclick=()=>exportXlsx(state.results,'relatorio-compass-whatsapp.xlsx','Relatório');exportContacts.onclick=()=>exportXlsx(state.contacts,'contatos-compass-whatsapp.xlsx','Contatos');clearResults.onclick=()=>{state.results=[];state.queue=[];state.current=0;save();report()};rtable.innerHTML=state.results.length?`<table class="table"><thead><tr><th>Posição</th><th>Nome</th><th>Telefone</th><th>Empresa</th><th>Variação</th><th>Status</th><th>Tentativas</th><th>Enviado em</th></tr></thead><tbody>${state.results.map(r=>`<tr><td>${r.position||''}</td><td>${esc(r.name)}</td><td>${esc(r.phone)}</td><td>${esc(r.company)}</td><td>${r.variation}</td><td>${esc(r.status)}</td><td>${r.attempts||0}</td><td>${esc(r.sentAt||'')}</td></tr>`).join('')}</tbody></table>`:`<div class="empty">Ainda não há resultados nesta campanha.</div>`}
+exportResults.onclick=()=>exportXlsx(state.results,'relatorio-compass-whatsapp.xlsx','Relatório');exportContacts.onclick=()=>exportXlsx(state.contacts,'contatos-compass-whatsapp.xlsx','Contatos');clearResults.onclick=()=>{state.results=[];state.queue=[];state.current=0;state.resumeFrom=1;state.waitUntil=0;save();report()};rtable.innerHTML=state.results.length?`<table class="table"><thead><tr><th>Posição</th><th>Nome</th><th>Telefone</th><th>Empresa</th><th>Variação</th><th>Status</th><th>Tentativas</th><th>Enviado em</th></tr></thead><tbody>${state.results.map(r=>`<tr><td>${r.position||''}</td><td>${esc(r.name)}</td><td>${esc(r.phone)}</td><td>${esc(r.company)}</td><td>${r.variation}</td><td>${esc(r.status)}</td><td>${r.attempts||0}</td><td>${esc(r.sentAt||'')}</td></tr>`).join('')}</tbody></table>`:`<div class="empty">Ainda não há resultados nesta campanha.</div>`}
 function exportXlsx(rows,name,sheet){if(!rows.length)return alert('Não há dados para exportar.');const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,sheet);XLSX.writeFile(wb,name)}
 
 if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{})}
