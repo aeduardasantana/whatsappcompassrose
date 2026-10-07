@@ -1,67 +1,38 @@
-name: Build e Deploy GitHub Pages
+name: Deploy via ftp
+
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
-
 jobs:
-  build:
-    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+  deploy:
+    name: Build and Deploy
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Restaurar index de desenvolvimento
         run: cp source-index.html index.html
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Instalar dependências
+      - name: Install dependencies
         run: npm install
 
-      - name: Compilar aplicação
+      - name: Build
         run: npm run build
 
-      - name: Publicar build também na raiz da main
-        run: |
-          rm -rf assets
-          cp dist/index.html index.html
-          cp -r dist/assets assets
-          cp dist/manifest.webmanifest manifest.webmanifest
-          cp dist/sw.js sw.js
-          cp dist/CNAME CNAME
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add index.html assets manifest.webmanifest sw.js CNAME
-          if ! git diff --cached --quiet; then
-            git commit -m "Publicar build estático [skip ci]"
-            git push
-          fi
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: FTP Deploy Locaweb
+        uses: locaweb/ftp-deploy@1.0.0
         with:
-          path: ./dist
-
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+          host: ${{ secrets.HOST }}
+          user: ${{ secrets.USER }}
+          password: ${{ secrets.PASS }}
+          localDir: "./dist/"
+          remoteDir: "./public_html/agenzap/"
