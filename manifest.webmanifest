@@ -1,9 +1,9 @@
 {
-  "name": "Compass WhatsApp",
-  "short_name": "Compass WA",
+  "name": "AgenZap",
+  "short_name": "AgenZap",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#111827",
-  "description": "Central local de campanhas WhatsApp com Excel como base operacional."
+  "description": "Ferramenta local para organização de campanhas e envios assistidos via WhatsApp."
 }
